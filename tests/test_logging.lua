@@ -10,7 +10,8 @@ local function copy(tbl)
     return new_table
 end
 
-local logging = require('logging')
+local logging = require 'logging'
+local common = require 'common'
 
 module( "test_logging_general", package.seeall, lunit.testcase )
 
@@ -101,6 +102,43 @@ function test_format()
     assert_equal(os.date('%Y'), s) --don't launch me on New Year eve. 
 end
 
+module( "test_BufferingFormatter", package.seeall, lunit.testcase )
+
+local function get_recs()
+    local args = copy(creation_args)
+    r1 = logging.LogRecord(args)
+    r1.msg = 'Hello, %(world)s'
+    r1.args = {world='earth'}
+    r2 = logging.LogRecord(args)
+    r2.msg = 'How are you, %(major)s'
+    r2.args = {major='tom'}
+    r3 = logging.LogRecord(args)
+    r3.msg = 'Bye, %(major)s, bye %(world)s'
+    r3.args = {major='tom', world='earth'}
+    return {r1, r2, r3}
+end
+
+
+function test_buffering_formatter()
+    local args = copy(creation_args)
+    bf = logging.BufferingFormatter()
+    assert_equal('Hello, earthHow are you, tomBye, tom, bye earth', bf:format(get_recs()))
+end
+
+function test_buffering_formatter_inherited()
+    child = common.baseclass.class({}, logging.BufferingFormatter)
+    function child:formatHeader(recs) return ("Begin %d"):format(#recs) end
+    function child:formatFooter(recs) return ("End %d"):format(#recs) end
+    bf = child()
+    assert_equal('Begin 3Hello, earthHow are you, tomBye, tom, bye earthEnd 3', bf:format(get_recs()))
+end
+
+function test_custom_formatter()
+    fmt = logging.Formatter('%(levelname)s %(message)s|')
+    bf = logging.BufferingFormatter(fmt)
+    assert_equal('WARNING Hello, earth|WARNING How are you, tom|WARNING Bye, tom, bye earth|', bf:format(get_recs()))
+end
+
 module( "test_Filter", package.seeall, lunit.testcase )
 
 function test_filter()
@@ -124,4 +162,33 @@ function test_filter()
     assert_true(f4:filter(r))
     r.name = 'a.c'
     assert_true(f4:filter(r))
+end
+
+module( "test_Filterer", package.seeall, lunit.testcase)
+
+function test_filterer()
+    f = logging.Filterer()
+    a = logging.Filter('a')
+    ac = logging.Filter('a.c')
+    ad = logging.Filter('a.d')
+    f:addFilter(a)
+    f:addFilter(ac)
+    f:addFilter(ad)
+    r = logging.LogRecord(copy(creation_args))
+    r.name = 'a'
+    assert_false(f:filter(r))
+    r.name = 'a.c'
+    assert_false(f:filter(r))
+    f:removeFilter(ad)
+    assert_true(f:filter(r))
+    f:addFilter(ad)
+    assert_false(f:filter(r))
+    r.name = 'a.d.d'
+    f:removeFilter(ac)
+    assert_true(f:filter(r))
+    r.name = 'root'
+    f:removeFilter(a)
+    f:removeFilter(ac)
+    f:removeFilter(ad)
+    assert_true(f:filter(r))
 end
