@@ -246,13 +246,13 @@ local function weakref(value)
 end
 
 function logging._addHandlerRef(handler)
-    table.insert(self._handlersShutdownList, weakref(handler))
+    table.insert(logging._handlersShutdownList, weakref(handler))
 end
 
 function logging._removeHandlerRef(handler)
     local i = common.table.index(logging._handlers, handler)
     if i then
-        table.remove(self._handlersShutdownList, i)
+        table.remove(logging._handlersShutdownList, i)
     end
 end
 
@@ -262,7 +262,7 @@ end
 
 logging.Handler = common.baseclass.class({}, logging.Filterer)
 
-function logging.Handler.__create(level)
+function logging.Handler:__create(level)
     oo.superclass(logging.Handler).__create(self)
     self.level = level or logging.levels.NOTSET
     self.level = logging._checkLevel(self.level)
@@ -320,7 +320,7 @@ function logging.Handler:flush()
 end
 
 function logging.Handler:handleError(record, err)
-    if logging.raiseExceptions then
+    if logging.raiseExceptions  and io.stderr then
         -- TODO: Implement traceback?
         io.stderr:write(err .. '\n')
         io.stderr:write(('Logged from file %s, line %s\n'):format(

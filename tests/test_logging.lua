@@ -192,3 +192,76 @@ function test_filterer()
     f:removeFilter(ad)
     assert_true(f:filter(r))
 end
+
+module( "test_Handler", package.seeall, lunit.testcase)
+
+function test_handler_create()
+    hc = logging.Handler
+    h = hc()
+    local found = false
+    for i,v in ipairs(logging._handlersShutdownList) do
+        if v.value == h then
+            found = true
+        end
+    end
+    assert_true(found, "Handler not in handler shutdown list!")
+    h = nil
+    collectgarbage()
+    assert_nil(common.table.index(logging._handlersShutdownList, h))
+    h = hc()
+    h:setName('a')
+    assert_equal(h, logging._handlers['a'])
+    h = h
+    h = nil
+    collectgarbage()
+    local c = 0
+    for k,v in pairs(logging._handlers) do
+        c = c + 1
+    end
+    assert_equal(0, c)
+end
+
+function test_handler_functions()
+    h = logging.Handler()
+    h:setLevel(40)
+    assert_equal(40, h.level)
+
+    r = logging.LogRecord(copy(creation_args))
+    r.msg = 'test %s'
+    r.args = {1}
+    assert_equal('test 1', h:format(r))
+
+    h:setFormatter(logging.Formatter('%(levelname)s %(message)s'))
+    assert_equal('WARNING test 1', h:format(r))
+
+    h:setFormatter(nil)
+    assert_equal('test 1', h:format(r))
+
+    assert_error('emit should raise notimplementederror', function () h:emit(r) end)
+
+    child = common.baseclass.class({}, logging.Handler)
+    local emitted = {}
+    function child:emit(record)
+        table.insert(emitted, record)
+    end
+    h = child()
+    h:handle(r)
+    assert_equal(r, emitted[1])
+
+    h:addFilter(logging.Filter('a.c'))
+    args = copy(creation_args)
+    r2 = logging.LogRecord(copy(creation_args))
+    r2.name = 'a.b'
+    h:handle(r2)
+    assert_equal(1, #emitted)
+
+    r2.name = 'a.c'
+    h:handle(r2)
+    assert_equal(r2, emitted[2])
+
+    h:setName('b')
+    h:close()
+
+    assert_nil(logging._handlers['b'])
+
+end
