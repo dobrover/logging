@@ -1,6 +1,7 @@
 local logging = {}
 
 local oo = require "loop.simple"
+local path = require "pl.path"
 
 local common = require 'common'
 
@@ -59,9 +60,10 @@ end
 -- LogRecord
 --------------------------------------------------------------------------------
 
-logging.LogRecord = common.baseclass.class()
+local LogRecord = common.baseclass.class()
+logging.LogRecord = LogRecord
 
-function logging.LogRecord:__create(args)
+function LogRecord:__create(args)
     -- If we have to restore from table, just set it as object
     if args.obj ~= nil then
         for k, v in pairs(args.obj) do
@@ -88,13 +90,13 @@ function logging.LogRecord:__create(args)
     self.funcName = args.func
 end
 
-function logging.LogRecord:__tostring()
+function LogRecord:__tostring()
     return ('<LogRecord: %s, %s, %s, %s, "%s">'):format(
         self.name, self.levelno, self.pathname, self.lineno, self.msg
     )
 end
 
-function logging.LogRecord:getMessage()
+function LogRecord:getMessage()
     if self.args then
         return common.string.interpolate(self.msg, self.args)
     else
@@ -106,9 +108,10 @@ end
 -- Formatter
 --------------------------------------------------------------------------------
 
-logging.Formatter = common.baseclass.class()
+local Formatter = common.baseclass.class()
+logging.Formatter = Formatter
 
-function logging.Formatter:__create(fmt, datefmt)
+function Formatter:__create(fmt, datefmt)
     self._fmt = fmt
     if not self._fmt then
         self._fmt = '%(message)s'
@@ -116,7 +119,7 @@ function logging.Formatter:__create(fmt, datefmt)
     self.datefmt = datefmt
 end
 
-function logging.Formatter:formatTime(record, datefmt)
+function Formatter:formatTime(record, datefmt)
     -- TODO: localtime ?
     if datefmt then
         return os.date(datefmt, record.created)
@@ -126,15 +129,15 @@ function logging.Formatter:formatTime(record, datefmt)
     end
 end
 
-function logging.Formatter:usesTime()
+function Formatter:usesTime()
     return self._fmt:find("%%%(asctime%)") ~= nil
 end
 
-function logging.Formatter:formatException(ei)
+function Formatter:formatException(ei)
     error("Not implemented!")
 end
 
-function logging.Formatter:format(record)
+function Formatter:format(record)
     record.message = record:getMessage()
     if self:usesTime() then
         record.asctime = self:formatTime(record, self.datefmt)
@@ -150,24 +153,25 @@ logging._defaultFormatter = logging.Formatter()
 -- BufferingFormatter
 --------------------------------------------------------------------------------
 
-logging.BufferingFormatter = common.baseclass.class()
+local BufferingFormatter = common.baseclass.class()
+logging.BufferingFormatter = BufferingFormatter
 
-function logging.BufferingFormatter:__create(linefmt)
+function BufferingFormatter:__create(linefmt)
     self.linefmt = linefmt
     if not self.linefmt then
         self.linefmt = logging._defaultFormatter
     end
 end
 
-function logging.BufferingFormatter:formatHeader(records)
+function BufferingFormatter:formatHeader(records)
     return ""
 end
 
-function logging.BufferingFormatter:formatFooter(records)
+function BufferingFormatter:formatFooter(records)
     return ""
 end
 
-function logging.BufferingFormatter:format(records)
+function BufferingFormatter:format(records)
     rv = {}
     if #records > 0 then
         table.insert(rv, self:formatHeader(records))
@@ -183,13 +187,15 @@ end
 -- Filter
 --------------------------------------------------------------------------------
 
-logging.Filter = common.baseclass.class()
+local Filter = common.baseclass.class()
+logging.Filter = Filter
 
-function logging.Filter:__create(name)
+
+function Filter:__create(name)
     self.name = name or ''
 end
 
-function logging.Filter:filter(record)
+function Filter:filter(record)
     if self.name:len() == 0 or self.name == record.name then
         return true
     end
@@ -202,27 +208,27 @@ end
 --------------------------------------------------------------------------------
 -- Filterer
 --------------------------------------------------------------------------------
+local Filterer = common.baseclass.class()
+logging.Filterer = Filterer
 
-logging.Filterer = common.baseclass.class()
-
-function logging.Filterer:__create()
+function Filterer:__create()
     self.filters = {}
 end
 
-function logging.Filterer:addFilter(filter)
+function Filterer:addFilter(filter)
     if not common.table.index(self.filters, filter) then
         table.insert(self.filters, filter)
     end
 end
 
-function logging.Filterer:removeFilter(filter_to_remove)
+function Filterer:removeFilter(filter_to_remove)
     local i = common.table.index(self.filters, filter_to_remove)
     if i then
         table.remove(self.filters, i)
     end
 end
 
-function logging.Filterer:filter(record)
+function Filterer:filter(record)
     for i, filter in ipairs(self.filters) do
         if not filter:filter(record) then
             return false
@@ -260,10 +266,11 @@ end
 -- Handler
 --------------------------------------------------------------------------------
 
-logging.Handler = common.baseclass.class({}, logging.Filterer)
+local Handler = common.baseclass.class({}, Filterer)
+logging.Handler = Handler
 
-function logging.Handler:__create(level)
-    oo.superclass(logging.Handler).__create(self)
+function Handler:__create(level)
+    oo.superclass(Handler).__create(self)
     self.level = level or logging.levels.NOTSET
     self.level = logging._checkLevel(self.level)
     self._name = nil
@@ -271,11 +278,11 @@ function logging.Handler:__create(level)
     logging._addHandlerRef(self)
 end
 
-function logging.Handler:getName()
+function Handler:getName()
     return self._name
 end
 
-function logging.Handler:setName(name)
+function Handler:setName(name)
     if self._name ~= nil and logging._handlers[self._name] ~= nil then
         logging._handlers[self._name] = nil
     end
@@ -285,11 +292,11 @@ function logging.Handler:setName(name)
     end
 end
 
-function logging.Handler:setLevel(level)
+function Handler:setLevel(level)
     self.level = logging._checkLevel(level)
 end
 
-function logging.Handler:format(record)
+function Handler:format(record)
     local fmt = nil
     if self.formatter then
         fmt = self.formatter
@@ -299,11 +306,11 @@ function logging.Handler:format(record)
     return fmt:format(record)
 end
 
-function logging.Handler:emit(record)
+function Handler:emit(record)
     error("emit must be implemented by subclasses.")
 end
 
-function logging.Handler:handle(record)
+function Handler:handle(record)
     local rv = self:filter(record)
     if rv then
         self:emit(record)
@@ -311,15 +318,15 @@ function logging.Handler:handle(record)
     return rv
 end
 
-function logging.Handler:setFormatter(formatter)
+function Handler:setFormatter(formatter)
     self.formatter = formatter
 end
 
-function logging.Handler:flush()
+function Handler:flush()
 
 end
 
-function logging.Handler:handleError(record, err)
+function Handler:handleError(record, err)
     if logging.raiseExceptions  and io.stderr then
         -- TODO: Implement traceback?
         io.stderr:write(err .. '\n')
@@ -329,13 +336,192 @@ function logging.Handler:handleError(record, err)
     end
 end
 
-function logging.Handler:close()
+function Handler:close()
     self:setName(nil) -- remove from _handlers list
 end
 
-function logging.Handler:__gc()
+function Handler:__gc()
     logging._removeHandlerRef(self)
     self:close()
+end
+
+local StreamHandler = common.baseclass.class({}, Handler)
+logging.StreamHandler = StreamHandler
+
+function StreamHandler:__create(stream)
+    oo.superclass(StreamHandler).__create(self)
+    self.stream = stream or io.stderr
+end
+
+function StreamHandler:flush()
+    if self.stream.flush then
+        self.stream:flush()
+    end
+end
+
+function StreamHandler:emit(record)
+    -- TODO: Try-finally?  Handlerror?
+    local msg = self:format(record)
+    self.stream:write(msg .. '\n')
+
+end
+
+local FileHandler = common.baseclass.class({}, StreamHandler)
+logging.FileHandler = FileHandler
+
+function FileHandler:__create(filename, mode, delay)
+    self.baseFilename = path.abspath(filename)
+    self.mode = mode or 'a'
+    self.delay = delay or false
+    if delay then
+        oo.superclass(FileHandler).__create(self)
+        self.stream = nil
+    else
+        oo.superclass(FileHandler).__create(self, self:_open())
+    end
+end
+
+function FileHandler:close()
+    if self.stream then
+        self:flush()
+        if self.stream.close then
+            self.stream:close()
+        end
+        oo.superclass(FileHandler).close(self)
+        self.stream = nil
+    end
+end
+
+function FileHandler:_open()
+    local f, err = io.open(self.baseFilename, self.mode)
+    if not f then
+        -- TODO: What to do here?
+        error(err)
+    end
+    return f
+end
+
+function FileHandler:emit(record)
+    if not self.stream then
+        self.stream = self:_open()
+    end
+    oo.superclass(FileHandler).emit(self, record)
+end
+
+local PlaceHolder = common.baseclass.class()
+logging.PlaceHolder = PlaceHolder
+
+function PlaceHolder:__create(alogger)
+    self.loggerMap = {}
+    self.loggerMap[alogger] = true
+end
+
+function PlaceHolder:append(alogger)
+    if not self.loggerMap[alogger] then
+        self.loggerMap[alogger] = true
+    end
+end
+
+logging._loggerClass = nil
+
+function logging._checkLoggerClass(klass)
+    if klass ~= logging.Logger then
+        if not oo.subclassof(klass, logging.Logger) then
+            error("Logger not derived from logging.Logger: " .. klass)
+        end
+    end
+    return klass
+end
+
+function logging.setLoggerClass(klass)
+    logging._loggerClass = logging._checkLoggerClass(klass)            
+end
+
+function logging.getLoggerClass()
+    return logging._loggerClass
+end
+
+local Manager = common.baseclass.class()
+logging.Manager = Manager
+
+function Manager:__create(rootnode)
+    self.root = rootnode
+    self.disable = false
+    self.emittedNoHandlerWarning = false
+    self.loggerDict = {}
+    self.loggerClass = nil
+end
+
+function Manager:getLogger(name)
+    local rv = nil
+    if type(name) ~= 'string' then
+        error('A logger name must be string')
+    end
+    local existing_logger = self.loggerDict[name]
+    if existing_logger then
+        rv = existing_logger
+        if oo.instanceof(rv, PlaceHolder) then
+            local ph = rv
+            rv = (self.loggerClass or logging._loggerClass)(name)
+            rv.manager = self
+            self.loggerDict[name] = rv
+            self:_fixupChildren(ph, rv)
+            self:_fixupParents(rv)
+        end
+    else
+        rv = (self.loggerClass or logging._loggerClass)(name)
+        rv.manager = self
+        self.loggerDict[name] = rv
+        self:_fixupParents(rv)
+    end
+    return rv
+end
+
+function Manager:setLoggerClass(klass)
+    self.loggerClass = logging._checkLoggerClass(klass)
+end
+
+function Manager:_fixupParents(alogger)
+    local name = alogger.name
+    local name_len = name:len()
+    local rv = nil
+    for i = name_len, 1, -1 do
+        if rv then
+            break
+        end
+        if name:sub(i,i) == '.' then
+            local logger_name = name:sub(1, i - 1)
+            if not self.loggerDict[logger_name] then
+                self.loggerDict[logger_name] = PlaceHolder(alogger)
+            else
+                local obj = self.loggerDict[logger_name]
+                if oo.instanceof(obj, Logger) then
+                    rv = obj
+                else
+                    assert(oo.instanceof(obj, PlaceHolder))
+                    obj:append(alogger)
+                end
+            end
+        end
+    end
+    if not rv then
+        rv = self.root
+    end
+    alogger.parent = rv
+end
+
+
+function Manager:_fixupChildren(ph, alogger)
+    local name = alogger.name
+    local namelen = name:len()
+    for c, v in pairs(ph.loggerMap) do
+        -- If childs parent is below, ignore it.
+        if c.parent.name:sub(1, namelen) ~= name then
+            -- for all c c.parent will be equal
+            alogger.parent = c.parent
+            c.parent = alogger
+        end
+    end
 end
 
 return common.package(logging, ...)

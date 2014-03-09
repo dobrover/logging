@@ -12,6 +12,7 @@ end
 
 local logging = require 'logging'
 local common = require 'common'
+local stringio = require 'pl.stringio'
 
 module( "test_logging_general", package.seeall, lunit.testcase )
 
@@ -265,3 +266,80 @@ function test_handler_functions()
     assert_nil(logging._handlers['b'])
 
 end
+
+module( "test_streamhandler", package.seeall, lunit.testcase)
+
+function test_streamhandler_simple()
+    h = logging.StreamHandler()
+    assert_equal(io.stderr, h.stream)
+
+    f = stringio.create()
+    h = logging.StreamHandler(f)
+    r = logging.LogRecord(creation_args)
+    r.msg = 'hello %(world)s'
+    r.args = {world='earth'}
+    h:handle(r)
+    r.msg = 'bye %(major)s'
+    r.args = {major='tom'}
+    h:handle(r)
+    assert_equal('hello earth\nbye tom\n', f:value())
+
+
+    h:flush()
+    called = false
+    f.flush = function(self)
+        assert_equal(self, f)
+        called = true
+    end
+    h:flush()
+    assert_true(called)
+    -- Check that parent constructor is called
+    assert_equal(0, h.level)
+end
+
+module( "test_filehandler", package.seeall, lunit.testcase)
+
+local fname = nil
+function setup()
+    random_name = {}
+    for i = 1,32 do
+        table.insert(random_name, string.char(math.random(65,90)))
+    end
+    random_name = table.concat(random_name)
+    fname = '/tmp/'..random_name
+end
+
+function teardown()
+    os.remove(fname)
+end
+
+function test_filehandler_simple()
+    h = logging.FileHandler(fname)
+    r = logging.LogRecord(creation_args)
+    r.msg = 'hello %(world)s'
+    r.args = {world='earth'}
+    h:handle(r)
+    r.msg = 'bye %(major)s'
+    r.args = {major='tom'}
+    h:handle(r)
+    h:flush()
+    resf = io.open(fname, 'rb'):read('*all')
+    assert_equal('hello earth\nbye tom\n', resf)
+    os.remove(fname)
+    h:close()
+
+    h = logging.FileHandler(fname, 'wb', true)
+    r = logging.LogRecord(creation_args)
+    r.msg = 'hello! %(world)s'
+    r.args = {world='earth'}
+    h:handle(r)
+    r.msg = 'bye! %(major)s'
+    r.args = {major='tom'}
+    h:handle(r)
+    h:close()
+    resf = io.open(fname, 'rb'):read('*all')
+    assert_equal('hello! earth\nbye! tom\n', resf)
+    os.remove(fname)
+end
+
+
