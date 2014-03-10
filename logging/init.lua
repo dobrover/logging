@@ -10,7 +10,6 @@ local common = require 'common'
 --------------------------------------------------------------------------------
 
 logging._startTime = common.time.time()
--- TODO: Move all class declarations to the top.
 
 -- raiseExceptions is used to see if exceptions during handling should be
 -- propagated
@@ -52,6 +51,10 @@ logging.levels = {
     [DEBUG] = "DEBUG",
     [NOTSET] = "NOTSET",
 }
+
+-- Since we don't have ability to get last thrown exception,
+-- leave this as stub for exception() method.
+logging.NO_EXC_MESSAGE = '(no exception message avaliable)'
 
 function logging.getLevelName(level)
     if logging.levels[level] ~= nil then
@@ -116,6 +119,9 @@ logging.RootLogger = RootLogger
 local LoggerAdapter = common.baseclass.class()
 logging.LoggerAdapter = LoggerAdapter
 
+local NullHandler = common.baseclass.class({}, Handler)
+logging.NullHandler = NullHandler
+
 logging._loggerClass = Logger
 
 --------------------------------------------------------------------------------
@@ -157,7 +163,6 @@ end
 
 function LogRecord:getMessage()
     if self.args then
-
         return self.msg:format(unpack(self.args))
     else
         return self.msg
@@ -381,6 +386,9 @@ function Handler:handle(record)
 end
 
 function Handler:setFormatter(formatter)
+    if formatter ~= nil and not oo.instanceof(formatter, logging.Formatter) then
+        error("Formatter should be instance of logging.Formatter")
+    end
     self.formatter = formatter
 end
 
@@ -599,7 +607,7 @@ end
 -- info, debug, error, etc, functions are defined below
 -- in a loop
 function Logger:exception(args)
-    args.exc_info = true
+    args.exc_msg = logging.NO_EXC_MESSAGE
     self:error(args)
 end
 
@@ -662,16 +670,27 @@ function Logger:_log(level, args)
     else
         fn, lno, func = "(unknown file)", 0, "(unknown function)"
     end
-    exc_info = {exc_msg='', exc_tb=''}
+    exc_info = {}
     if args.exc_msg then
         exc_info.exc_msg = args.exc_msg
     end
     if args.exc_tb then
         exc_info.exc_tb = args.exc_tb
     end
+    -- Automatically add traceback
+    if exc_info.exc_msg and not exc_info.exc_tb then
+        local source = debug.getinfo(1, "S").source
+        local i = 2
+        while true do
+            if debug.getinfo(i, "S").source ~= source then
+                break
+            end
+            i = i + 1
+        end
+        exc_info.exc_tb = debug.traceback(nil, i)
+    end
 
     args.exc_info = exc_info
-
     local msg = args[1]
     local actual_args = {}
     for i, v in ipairs(args) do
@@ -789,12 +808,54 @@ end
 
 function LoggerAdapter:exception(args)
     self:process(args)
-    args.exc_info = true
-    self.logger.error(args)
+    args.exc_msg = logging.NO_EXC_MESSAGE
+    self.logger:error(args)
 end
 
 function LoggerAdapter:isEnabledFor(level)
     return self.logger:isEnabledFor(level)
+end
+
+--------------------------------------------------------------------------------
+-- Default settings
+--------------------------------------------------------------------------------
+
+logging.root = RootLogger(WARNING)
+Logger.root = logging.root
+Logger.manager = Manager(Logger.root)
+
+logging.BASIC_FORMAT = "%(levelname)s:%(name)s:%(message)s"
+
+function logging.basicConfig(kwargs)
+    kwargs = kwargs or {}
+    if #logging.root.handlers ~= 0 then
+        return
+    end
+    local filename = kwargs.filename
+    local hdlr = nil
+    if filename then
+        local mode = kwargs.filemode or 'a'
+        hdlr = FileHandler(filename, mode)
+    else
+        hdlr = StreamHandler(kwargs.stream)
+    end
+    local fs = kwargs.format or logging.BASIC_FORMAT
+    local dfs = kwargs.datefmt
+    local fmt = Formatter(fs, fds)
+    hdlr:setFormatter(fmt)
+    logging.root:addHandler(hdlr)
+    local level = kwargs.level
+    if level then
+        logging.root:setLevel(level)
+    end
+end
+
+function logging.getLogger(name)
+    if name and name ~= '' then
+        return Logger.manager:getLogger(name)
+    else
+        return logging.root
+    end
 end
 
 --------------------------------------------------------------------------------
@@ -815,17 +876,55 @@ for k, v in pairs(logging.levels) do
             self.logger[levelname](self.logger, args)
         end
         logging[levelname] = function (args)
-            -- TODO: Fucntion
+            if #logging.root.handlers == 0 then
+                logging.basicConfig()
+            end
+            logging.root[levelname](logging.root, args)
         end
     end 
 end
 
---------------------------------------------------------------------------------
--- Default settings
---------------------------------------------------------------------------------
+function logging.exception(args)
+    args.exc_msg = logging.NO_EXC_MESSAGE
+    logging.error(args)
+end
 
-logging.root = RootLogger(WARNING)
-Logger.root = logging.root
-Logger.manager = Manager(Logger.root)
+function logging.log(level, args)
+    if #logging.root.handlers == 0 then
+        logging.basicConfig()
+    end
+    logging.root:log(level, args)
+end
+
+function logging.disable(level)
+    logging.root.manager.disable = level
+end
+
+function logging.shutdown(handlerList)
+    handlerList = handlerList or logging._handlersShutdownList
+    local h = nil
+    for i = #handlerList,1,-1 do
+        h = handlerList[i].value
+        if h then
+            pcall(function()
+                h:flush()
+                h:close()
+            end)
+        end
+    end
+    -- TODO: raise exception if we failed?
+end
+
+-- Emulating atexit
+logging._atexit_object = {}
+setmetatable(logging._atexit_object, {
+    __gc = logging.shutdown
+})
+
+function NullHandler:handle(record)
+end
+
+function NullHandler:emit(record)
+end
 
 return common.package(logging, ...)

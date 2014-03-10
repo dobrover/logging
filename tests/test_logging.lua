@@ -268,6 +268,13 @@ function test_handler_functions()
 
 end
 
+function test_handler_formatter()
+    assert_error(function() 
+        h = logging.Handler()
+        h:setFormatter("String")
+    end)
+end
+
 module( "test_streamhandler", package.seeall, lunit.testcase)
 
 function test_streamhandler_simple()
@@ -581,5 +588,96 @@ function test_logger_exception()
     l:addHandler(h)
     l:info{"test"; exc_msg="error", exc_tb="traceback"}
     assert_equal("test\ntraceback\nerror\n",sio:value())
+end
 
+module( "test_logger_adapter", package.seeall, lunit.testcase)
+
+function test_logger_adapter_simple()
+    root = logging.RootLogger(0)
+    manager = logging.Manager(root)
+    l = manager:getLogger('hello')
+    l:setLevel(20)
+    la = logging.LoggerAdapter(l, {hello='world'})
+    sio = stringio.create()
+    h = logging.StreamHandler(sio)
+    l:addHandler(h)
+    fmt = logging.Formatter("%(hello)s %(message)s")
+    h:setFormatter(fmt)
+    la:info{"Hello!"}
+    assert_equal('world Hello!\n', sio:value())
+
+    assert_false(la:isEnabledFor(10))
+    assert_true(la:isEnabledFor(20))
+
+    sio = stringio.create()
+    l:removeHandler(h)
+    h = logging.StreamHandler(sio)
+    l:addHandler(h)
+    la:exception{"Yup"}
+    assert_not_nil(sio:value():find('Yup\n'))
+    assert_not_nil(sio:value():find('test_logging.lua'))
+    assert_not_nil(sio:value():find(logging.NO_EXC_MESSAGE))
+
+    sio = stringio.create()
+    l:removeHandler(h)
+    h = logging.StreamHandler(sio)
+    l:addHandler(h)
+    la:log(20, {"Yuppy"})
+    assert_equal('Yuppy\n', sio:value())
+end
+
+module( "test_logging_misc", package.seeall, lunit.testcase)
+
+function test_logging_misc_simple()
+    package.loaded.logging = nil
+    local logging = require 'logging'
+    local sio = stringio.create()
+    logging.basicConfig{stream=sio, format="%(levelname)s %(message)s", level=30}
+    logging.info{"Test1"}
+    logging.error{"Test2"}
+
+   logging.disable(30)
+   
+   logging.warn{"No!"}
+   logging.error{"Yes!"}
+
+    assert_equal('ERROR Test2\nERROR Yes!\n', sio:value())
+
+    package.loaded.logging = nil
+    local logging = require 'logging'
+    local sio = stringio.create()
+    logging.basicConfig{stream=sio, format="%(levelname)s %(message)s", level=30}
+
+    logging.log(42, {"An answer"})
+
+    assert_equal("Level 42 An answer\n", sio:value())
+end
+
+function test_logging_shutdown()
+    package.loaded.logging = nil
+    local logging =require 'logging'
+    local execlog = ''
+    myhdlr = common.baseclass.class({}, logging.Handler)
+    function myhdlr:flush()
+        execlog = execlog .. '|' .. self._name .. '.flush()'
+    end
+    function myhdlr:close()
+        execlog = execlog .. '|' .. self._name .. '.close()'
+    end
+    h1 = myhdlr()
+    h1:setName('h1')
+    h2 = myhdlr()
+    h2:setName('h2')
+    -- Emulate shutdown
+    logging.shutdown()
+    assert_equal('|h2.flush()|h2.close()|h1.flush()|h1.close()', execlog)
+end
+
+function test_nullhandler()
+    nh = logging.NullHandler()
+    root = logging.RootLogger(0)
+    manager = logging.Manager(root)
+    l = manager:getLogger('hello')
+    l:addHandler(nh)
+    l:info{"Enter the void"}
 end
