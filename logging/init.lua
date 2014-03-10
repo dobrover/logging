@@ -10,7 +10,7 @@ local common = require 'common'
 --------------------------------------------------------------------------------
 
 logging._startTime = common.time.time()
-
+-- TODO: Move all class declarations to the top.
 
 -- raiseExceptions is used to see if exceptions during handling should be
 -- propagated
@@ -75,12 +75,50 @@ function logging._checkLevel(level_or_name)
     return nil
 end
 
+local LogRecord = common.baseclass.class()
+logging.LogRecord = LogRecord
+
+local Formatter = common.baseclass.class()
+logging.Formatter = Formatter
+
+local BufferingFormatter = common.baseclass.class()
+logging.BufferingFormatter = BufferingFormatter
+
+local Filter = common.baseclass.class()
+logging.Filter = Filter
+
+local Filterer = common.baseclass.class()
+logging.Filterer = Filterer
+
+local Handler = common.baseclass.class({}, Filterer)
+logging.Handler = Handler
+
+local StreamHandler = common.baseclass.class({}, Handler)
+logging.StreamHandler = StreamHandler
+
+local FileHandler = common.baseclass.class({}, StreamHandler)
+logging.FileHandler = FileHandler
+
+local PlaceHolder = common.baseclass.class()
+logging.PlaceHolder = PlaceHolder
+
+local Manager = common.baseclass.class()
+logging.Manager = Manager
+
+local Logger = common.baseclass.class({}, Filterer)
+logging.Logger = Logger
+
+local RootLogger = common.baseclass.class({}, Logger)
+logging.RootLogger = RootLogger
+
+local LoggerAdapter = common.baseclass.class()
+logging.LoggerAdapter = LoggerAdapter
+
+logging._loggerClass = Logger
+
 --------------------------------------------------------------------------------
 -- LogRecord
 --------------------------------------------------------------------------------
-
-local LogRecord = common.baseclass.class()
-logging.LogRecord = LogRecord
 
 function LogRecord:__create(args)
     -- If we have to restore from table, just set it as object
@@ -127,9 +165,6 @@ end
 -- Formatter
 --------------------------------------------------------------------------------
 
-local Formatter = common.baseclass.class()
-logging.Formatter = Formatter
-
 function Formatter:__create(fmt, datefmt)
     self._fmt = fmt
     if not self._fmt then
@@ -172,9 +207,6 @@ logging._defaultFormatter = logging.Formatter()
 -- BufferingFormatter
 --------------------------------------------------------------------------------
 
-local BufferingFormatter = common.baseclass.class()
-logging.BufferingFormatter = BufferingFormatter
-
 function BufferingFormatter:__create(linefmt)
     self.linefmt = linefmt
     if not self.linefmt then
@@ -206,10 +238,6 @@ end
 -- Filter
 --------------------------------------------------------------------------------
 
-local Filter = common.baseclass.class()
-logging.Filter = Filter
-
-
 function Filter:__create(name)
     self.name = name or ''
 end
@@ -227,8 +255,6 @@ end
 --------------------------------------------------------------------------------
 -- Filterer
 --------------------------------------------------------------------------------
-local Filterer = common.baseclass.class()
-logging.Filterer = Filterer
 
 function Filterer:__create()
     self.filters = {}
@@ -284,9 +310,6 @@ end
 --------------------------------------------------------------------------------
 -- Handler
 --------------------------------------------------------------------------------
-
-local Handler = common.baseclass.class({}, Filterer)
-logging.Handler = Handler
 
 function Handler:__create(level)
     oo.superclass(Handler).__create(self)
@@ -364,9 +387,6 @@ function Handler:__gc()
     self:close()
 end
 
-local StreamHandler = common.baseclass.class({}, Handler)
-logging.StreamHandler = StreamHandler
-
 function StreamHandler:__create(stream)
     oo.superclass(StreamHandler).__create(self)
     self.stream = stream or io.stderr
@@ -384,9 +404,6 @@ function StreamHandler:emit(record)
     self.stream:write(msg .. '\n')
 
 end
-
-local FileHandler = common.baseclass.class({}, StreamHandler)
-logging.FileHandler = FileHandler
 
 function FileHandler:__create(filename, mode, delay)
     self.baseFilename = path.abspath(filename)
@@ -427,8 +444,6 @@ function FileHandler:emit(record)
     oo.superclass(FileHandler).emit(self, record)
 end
 
-local PlaceHolder = common.baseclass.class()
-logging.PlaceHolder = PlaceHolder
 
 function PlaceHolder:__create(alogger)
     self.loggerMap = {}
@@ -458,11 +473,13 @@ function logging.getLoggerClass()
     return logging._loggerClass
 end
 
-local Manager = common.baseclass.class()
-logging.Manager = Manager
+--------------------------------------------------------------------------------
+-- Manager
+--------------------------------------------------------------------------------
 
 function Manager:__create(rootnode)
     self.root = rootnode
+    self.root.root = self.root
     self.disable = 0
     self.emittedNoHandlerWarning = false
     self.loggerDict = {}
@@ -477,7 +494,7 @@ function Manager:getLogger(name)
     local existing_logger = self.loggerDict[name]
     if existing_logger then
         rv = existing_logger
-        if oo.instanceof(rv, PlaceHolder) then
+        if oo.instanceof(rv, logging.PlaceHolder) then
             local ph = rv
             rv = (self.loggerClass or logging._loggerClass)(name)
             rv.manager = self
@@ -509,13 +526,13 @@ function Manager:_fixupParents(alogger)
         if name:sub(i,i) == '.' then
             local logger_name = name:sub(1, i - 1)
             if not self.loggerDict[logger_name] then
-                self.loggerDict[logger_name] = PlaceHolder(alogger)
+                self.loggerDict[logger_name] = logging.PlaceHolder(alogger)
             else
                 local obj = self.loggerDict[logger_name]
-                if oo.instanceof(obj, Logger) then
+                if oo.instanceof(obj, logging.Logger) then
                     rv = obj
                 else
-                    assert(oo.instanceof(obj, PlaceHolder))
+                    assert(oo.instanceof(obj, logging.PlaceHolder))
                     obj:append(alogger)
                 end
             end
@@ -541,11 +558,12 @@ function Manager:_fixupChildren(ph, alogger)
     end
 end
 
-local Logger = common.baseclass.class({}, Filterer)
-logging.Logger = Logger
+--------------------------------------------------------------------------------
+-- Logger
+--------------------------------------------------------------------------------
 
 function Logger:__create(name, level)
-    oo.superclass(Logger).__create(self, name, level)
+    oo.superclass(Logger).__create(self)
     self.name = name
     self.level = logging._checkLevel(level or NOTSET)
     self.parent = nil
@@ -559,8 +577,7 @@ function Logger:setLevel(level)
 end
 
 -- info, debug, error, etc, functions are defined below
--- for Logger and LoggerAdapter
-
+-- in a loop
 function Logger:exception(args)
     args.exc_info = true
     self:error(args)
@@ -632,12 +649,18 @@ function Logger:handle(record)
 end
 
 function Logger:addHandler(hdlr)
+    if not hdlr then
+        error("Handler cannot be nil!")
+    end
     if not common.table.index(self.handlers, hdlr) then
         table.insert(self.handlers, hdlr)
     end
 end
 
 function Logger:removeHandler(hdlr)
+    if not hdlr then
+        error("Handler cannot be nil!")
+    end
     local i = common.table.index(self.handlers, hdlr)
     if i then
         table.remove(self.handlers, i)
@@ -692,17 +715,17 @@ function Logger:getChild(suffix)
     return self.manager:getLogger(suffix)
 end
 
-local RootLogger = common.baseclass.class({}, Logger)
-logging.RootLogger = RootLogger
+--------------------------------------------------------------------------------
+-- RootLogger
+--------------------------------------------------------------------------------
 
 function RootLogger:__create(level)
     oo.superclass(RootLogger).__create(self, 'root', level)
 end
 
-logging._loggerClass = Logger
-
-local LoggerAdapter = common.baseclass.class()
-logging.LoggerAdapter = LoggerAdapter
+--------------------------------------------------------------------------------
+-- LoggerAdapter
+--------------------------------------------------------------------------------
 
 function LoggerAdapter:__create(logger, extra)
     self.logger = logger
@@ -728,7 +751,9 @@ function LoggerAdapter:isEnabledFor(level)
     return self.logger:isEnabledFor(level)
 end
 
--- Logging function for each level
+--------------------------------------------------------------------------------
+-- Logging functions for module, Logger, LoggerAdapter
+--------------------------------------------------------------------------------
 
 for k, v in pairs(logging.levels) do
     if type(k) == 'string' then
@@ -743,11 +768,18 @@ for k, v in pairs(logging.levels) do
             self:process(args)
             self.logger[levelname](self.logger, args)
         end
+        logging[levelname] = function (args)
+            -- TODO: Fucntion
+        end
     end 
 end
 
+--------------------------------------------------------------------------------
+-- Default settings
+--------------------------------------------------------------------------------
+
 logging.root = RootLogger(WARNING)
-Logger.root = root
+Logger.root = logging.root
 Logger.manager = Manager(Logger.root)
 
 return common.package(logging, ...)

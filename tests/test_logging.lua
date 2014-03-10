@@ -13,6 +13,7 @@ end
 local logging = require 'logging'
 local common = require 'common'
 local stringio = require 'pl.stringio'
+local oo = require 'loop.simple'
 
 module( "test_logging_general", package.seeall, lunit.testcase )
 
@@ -342,4 +343,163 @@ function test_filehandler_simple()
     os.remove(fname)
 end
 
+module( "test_logger_tree", package.seeall, lunit.testcase)
 
+function test_check_logger_class()
+    assert_equal(logging.Logger, logging._checkLoggerClass(logging.Logger))
+    anothercls = common.baseclass.class()
+    assert_error(function () logging._checkLoggerClass(anothercls) end)
+    childcls = common.baseclass.class({}, logging.Logger)
+    assert_equal(childcls, logging._checkLoggerClass(childcls))
+
+    logging.setLoggerClass(childcls)
+    assert_equal(childcls, logging.getLoggerClass())
+
+    assert_error(function () logging.setLoggerClass(anothercls) end)
+    logging.setLoggerClass(logging.Logger)
+end
+
+function test_manager()
+    root = logging.RootLogger(0)
+    manager = logging.Manager(root)
+    a = manager:getLogger('a')
+    ab = manager:getLogger('a.b')
+    ac = manager:getLogger('a.c')
+    assert_equal(a, ab.parent)
+    assert_equal(a, ac.parent)
+    assert_equal(root, a.parent)
+    assert_true(oo.instanceof(a, logging.Logger))
+end
+
+function test_manager_setclass()
+    manager = logging.Manager(logging.RootLogger(0))
+    manager.root.manager = manager
+    childcls = common.baseclass.class({}, logging.Logger)
+    anothercls = common.baseclass.class()
+    assert_error(function () manager:setLoggerClass(anothercls) end)
+    manager:setLoggerClass(childcls)
+    log = manager:getLogger('a.b.c')
+    assert_true(oo.instanceof(log, childcls))
+
+end
+
+function test_manager_skip_child()
+    root = logging.RootLogger(0)
+    manager = logging.Manager(root)
+    root.manager = manager
+    deep = manager:getLogger('a.b.c.d.e.f')
+    shallow = manager:getLogger('a.b.c.d')
+    assert_equal(shallow, deep.parent)
+    assert_equal(root, shallow.parent)
+    between = manager:getLogger('a.b.c.d.e')
+    assert_equal(between, deep.parent)
+    assert_equal(shallow, between.parent)
+    another_branch = manager:getLogger('a.b.c.banana')
+    assert_equal(root, another_branch.parent)
+    abc = manager:getLogger('a.b.c')
+    assert_equal(between, deep.parent)
+    assert_equal(shallow, between.parent)
+    assert_equal(abc, shallow.parent)
+    assert_equal(abc, another_branch.parent)
+    assert_equal(abc, manager:getLogger('a.b.c'))
+end
+
+module( "test_logger", package.seeall, lunit.testcase)
+
+function test_logger_general()
+    root = logging.RootLogger(0)
+    manager = logging.Manager(root)
+    root.manager = manager
+    abc = manager:getLogger('abc')
+    abc:setLevel(logging.WARNING)
+    assert_equal(logging.WARNING, abc.level)
+    abcde = abc:getChild('d.e')
+    assert_equal(manager:getLogger('abc.d.e'), abcde)
+    assert_equal(manager:getLogger('test.test'), root:getChild('test.test'))
+
+    x = manager:getLogger('x')
+    y = manager:getLogger('x.y')
+    z = manager:getLogger('x.y.z')
+    x:setLevel(10)
+    y:setLevel(20)
+    z:setLevel(30)
+    assert_equal(30, z:getEffectiveLevel())
+    z:setLevel(0)
+    assert_equal(20, z:getEffectiveLevel())
+    y:setLevel(0)
+    assert_equal(10, z:getEffectiveLevel())
+    assert_equal(10, y:getEffectiveLevel())
+    x:setLevel(0)
+    assert_equal(0, z:getEffectiveLevel())
+    root:setLevel(42)
+    assert_equal(42, z:getEffectiveLevel())
+    y:setLevel(21)
+    assert_equal(21, z:getEffectiveLevel())
+    assert_equal(21, y:getEffectiveLevel())
+
+    x:setLevel(10)
+    y:setLevel(20)
+    z:setLevel(30)
+    assert_true(z:isEnabledFor(30))
+    assert_true(z:isEnabledFor(31))
+    assert_false(z:isEnabledFor(29))
+    z:setLevel(0)
+    assert_true(z:isEnabledFor(29))
+    -- Disable all messages <= 20
+    manager.disable = 20
+    assert_true(z:isEnabledFor(29))
+    manager.disable = 29
+    assert_false(z:isEnabledFor(29))
+end
+
+function test_logger_callhandlers()
+    r1 = logging.LogRecord(creation_args)
+    root = logging.RootLogger(0)
+    manager = logging.Manager(root)
+    root.manager = manager
+    abc = manager:getLogger('a.b.c')
+    ab = manager:getLogger('a.b')
+    a = manager:getLogger('a')
+    abc_h1_s = stringio.create()
+    abc_h1 = logging.StreamHandler(abc_h1_s)
+    abc_h2_s = stringio.create()
+    abc_h2 = logging.StreamHandler(abc_h2_s)
+    abc:addHandler(abc_h1)
+    abc:addHandler(abc_h2)
+    a_h_s = stringio.create()
+    a_h = logging.StreamHandler(a_h_s)
+    a:addHandler(a_h)
+    abc_h1:setLevel(40)
+    abc_h2:setLevel(50)
+    a_h:setLevel(30)
+    r1.levelno = 60
+    r1.msg = 'msg60'
+    abc:handle(r1)
+    r1.levelno = 50
+    r1.msg = 'msg50'
+    abc:handle(r1)
+    r1.levelno = 40
+    r1.msg = 'msg40'
+    abc:handle(r1)
+    r1.levelno = 30
+    r1.msg = 'msg30'
+    abc:handle(r1)
+    r1.levelno = 20
+    r1.msg = 'msg20'
+    abc:handle(r1)
+
+    abc.propagate = false
+    r1.levelno = 60
+    r1.msg = 'abconly'
+    abc:handle(r1)
+
+    abc.propagate = true
+    abc.disabled = true
+    r1.msg = 'fornobody'
+    abc:handle(r1)
+
+    assert_equal('msg60\nmsg50\nmsg40\nabconly\n', abc_h1_s:value())
+    assert_equal('msg60\nmsg50\nabconly\n', abc_h2_s:value())
+    assert_equal('msg60\nmsg50\nmsg40\nmsg30\n', a_h_s:value())
+
+end
