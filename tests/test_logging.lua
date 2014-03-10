@@ -498,8 +498,88 @@ function test_logger_callhandlers()
     r1.msg = 'fornobody'
     abc:handle(r1)
 
+    abc.disabled = false
+    abc.propagate = false
+    abc:removeHandler(abc_h1)
+    r1.msg = 'for_h2_s'
+    r1.levelno = 60
+    abc:handle(r1)
+
     assert_equal('msg60\nmsg50\nmsg40\nabconly\n', abc_h1_s:value())
-    assert_equal('msg60\nmsg50\nabconly\n', abc_h2_s:value())
+    assert_equal('msg60\nmsg50\nabconly\nfor_h2_s\n', abc_h2_s:value())
     assert_equal('msg60\nmsg50\nmsg40\nmsg30\n', a_h_s:value())
+end
+
+function test_logger_log()
+    root = logging.RootLogger(0)
+    manager = logging.Manager(root)
+    root.manager = manager
+    mylogcls = common.baseclass.class({}, logging.Logger)
+    function mylogcls:handle(record)
+        self.handled = self.handled or {}
+        table.insert(self.handled, record)
+    end
+    manager:setLoggerClass(mylogcls)
+    l = manager:getLogger('logger')
+    l:log(20, {"hello %s", "world"})
+    r = l.handled[1]
+    assert_equal('hello %s', r.msg)
+    assert_equal('world', r.args[1])
+    assert_equal(1, #r.args)
+    assert_equal(20, r.levelno)
+    assert_error(function () l:log('s', {"msg"}) end)
+
+    l:setLevel(30)
+    l:log(20, {"msg"})
+    assert_nil(l.handled[2])
+
+    l:log(30, {"msg %s", "world"; exc_msg="Error!", exc_tb='tb', extra={x='y'}})
+    r = l.handled[2]
+    assert_equal("Error!", r.exc_info.exc_msg)
+    assert_equal("tb", r.exc_info.exc_tb)
+    assert_equal('y', r.x)
+
+    assert_error(function () l:log(30, {"msg"; extra={asctime=1}}) end)
+    assert_error(function () l:log(30, {"msg"; extra={levelname=1}}) end)
+    curline = debug.getinfo(1, "l").currentline
+    function testme()
+        l:log(30, {"msg"})
+    end
+    curline_end = debug.getinfo(1, "l").currentline
+    testme()
+    r = l.handled[3]
+
+    assert_true(curline < r.lineno)
+    assert_true(r.lineno < curline_end)
+
+    assert_not_nil(r.pathname:find('test_logging.lua'))
+
+end
+
+function test_logger_nohandlers()
+    root = logging.RootLogger(0)
+    manager = logging.Manager(root)
+    root.manager = manager
+
+    l = manager:getLogger('newname')
+    old_stderr = io.stderr
+    io.stderr = stringio.create()
+    l:info{"hello!"}
+    assert_equal("No handlers could be found for logger 'newname'\n" ,io.stderr:value())
+    io.stderr = old_stderr
+end
+
+function test_logger_exception()
+    root = logging.RootLogger(0)
+    manager = logging.Manager(root)
+    root.manager = manager
+
+    l = manager:getLogger('newname')
+    l:setLevel(10)
+    sio = stringio.create()
+    h = logging.StreamHandler(sio)
+    l:addHandler(h)
+    l:info{"test"; exc_msg="error", exc_tb="traceback"}
+    assert_equal("test\ntraceback\nerror\n",sio:value())
 
 end

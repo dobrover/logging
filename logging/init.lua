@@ -16,6 +16,8 @@ logging._startTime = common.time.time()
 -- propagated
 logging.raiseExceptions = true
 
+logging._srcfile = true
+
 local CRITICAL = 50
 local FATAL = CRITICAL
 local ERROR = 40
@@ -155,6 +157,7 @@ end
 
 function LogRecord:getMessage()
     if self.args then
+
         return self.msg:format(unpack(self.args))
     else
         return self.msg
@@ -188,7 +191,14 @@ function Formatter:usesTime()
 end
 
 function Formatter:formatException(ei)
-    error("Not implemented!")
+    local r = {}
+    if ei.exc_tb then
+        table.insert(r, ei.exc_tb)
+    end
+    if ei.exc_msg then
+        table.insert(r, ei.exc_msg)
+    end
+    return table.concat(r, '\n')
 end
 
 function Formatter:format(record)
@@ -197,7 +207,17 @@ function Formatter:format(record)
         record.asctime = self:formatTime(record, self.datefmt)
     end
     local s = common.string.interpolate(self._fmt, record)
-    -- TODO: Add exception info here
+    if record.exc_info then
+        if not record.exc_text then
+            record.exc_text = self:formatException(record.exc_info)
+        end
+    end
+    if record.exc_text then
+        if record.exc_text:len() > 0 and record.exc_text:sub(-1, -1) ~= '\n' then
+            s = s .. '\n'
+        end
+        s = s .. record.exc_text
+    end
     return s
 end
 
@@ -597,7 +617,23 @@ function Logger:log(level, args)
 end
 
 function Logger:findCaller()
-    -- TODO: stub
+    -- TODO: Investigate why can't get fname.
+    local current_file = debug.getinfo(1, "S").source
+    local info = nil
+    if current_file then
+        local i = 2
+        while true do
+            info = debug.getinfo(i, "nSflu")
+            if info.source ~= current_file then
+                local fname = info.name
+                local lineno = info.currentline
+                local pathname = info.source
+                return pathname, lineno, fname
+            end
+
+            i = i + 1
+        end
+    end
     return "(unknown file)", 0, "(unknown function)"
 end
 
@@ -626,9 +662,16 @@ function Logger:_log(level, args)
     else
         fn, lno, func = "(unknown file)", 0, "(unknown function)"
     end
-    if args.exc_info then
-        -- TODO:Get somehow exc-info?
+    exc_info = {exc_msg='', exc_tb=''}
+    if args.exc_msg then
+        exc_info.exc_msg = args.exc_msg
     end
+    if args.exc_tb then
+        exc_info.exc_tb = args.exc_tb
+    end
+
+    args.exc_info = exc_info
+
     local msg = args[1]
     local actual_args = {}
     for i, v in ipairs(args) do
@@ -662,6 +705,9 @@ function Logger:removeHandler(hdlr)
         error("Handler cannot be nil!")
     end
     local i = common.table.index(self.handlers, hdlr)
+    if not i then
+        error("Trying to remove handler not in handlers list!")
+    end
     if i then
         table.remove(self.handlers, i)
     end
@@ -685,7 +731,7 @@ function Logger:callHandlers(record)
     end
     if (not found_handler and logging.raiseExceptions
         and not self.manager.emittedNoHandlerWarning) then
-        io.stderr.write(("No handlers could be found for logger '%s'"):format(self.name))
+        io.stderr:write(("No handlers could be found for logger '%s'\n"):format(self.name))
         self.manager.emittedNoHandlerWarning = true
     end
 end
