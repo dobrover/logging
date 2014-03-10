@@ -16,20 +16,39 @@ logging._startTime = common.time.time()
 -- propagated
 logging.raiseExceptions = true
 
+local CRITICAL = 50
+local FATAL = CRITICAL
+local ERROR = 40
+local WARNING = 30
+local WARN = WARNING
+local INFO = 20
+local DEBUG = 10
+local NOTSET = 0
+
+logging.CRITICAL = CRITICAL
+logging.FATAL = FATAL
+logging.ERROR = ERROR
+logging.WARNING = WARNING
+logging.WARN = WARN
+logging.INFO = INFO
+logging.DEBUG = DEBUG
+logging.NOTSET = NOTSET
+
 logging.levels = {
-    CRITICAL = 50,
-    ERROR = 40,
-    WARNING = 30,
-    WARN = 30,
-    INFO = 20,
-    DEBUG = 10,
-    NOTSET = 0,
-    [50] = "CRITICAL",
-    [40] = "ERROR",
-    [30] = "WARNING",
-    [20] = "INFO",
-    [10] = "DEBUG",
-    [0] = "NOTSET",
+    CRITICAL = CRITICAL,
+    FATAL = CRITICAL,
+    ERROR = ERROR,
+    WARNING = WARNING,
+    WARN = WARNING,
+    INFO = INFO,
+    DEBUG = DEBUG,
+    NOTSET = NOTSET,
+    [CRITICAL] = "CRITICAL",
+    [ERROR] = "ERROR",
+    [WARNING] = "WARNING",
+    [INFO] = "INFO",
+    [DEBUG] = "DEBUG",
+    [NOTSET] = "NOTSET",
 }
 
 function logging.getLevelName(level)
@@ -98,7 +117,7 @@ end
 
 function LogRecord:getMessage()
     if self.args then
-        return common.string.interpolate(self.msg, self.args)
+        return self.msg:format(unpack(self.args))
     else
         return self.msg
     end
@@ -271,7 +290,7 @@ logging.Handler = Handler
 
 function Handler:__create(level)
     oo.superclass(Handler).__create(self)
-    self.level = level or logging.levels.NOTSET
+    self.level = level or NOTSET
     self.level = logging._checkLevel(self.level)
     self._name = nil
     self.formatter = nil
@@ -422,8 +441,6 @@ function PlaceHolder:append(alogger)
     end
 end
 
-logging._loggerClass = nil
-
 function logging._checkLoggerClass(klass)
     if klass ~= logging.Logger then
         if not oo.subclassof(klass, logging.Logger) then
@@ -446,7 +463,7 @@ logging.Manager = Manager
 
 function Manager:__create(rootnode)
     self.root = rootnode
-    self.disable = false
+    self.disable = 0
     self.emittedNoHandlerWarning = false
     self.loggerDict = {}
     self.loggerClass = nil
@@ -523,5 +540,214 @@ function Manager:_fixupChildren(ph, alogger)
         end
     end
 end
+
+local Logger = common.baseclass.class({}, Filterer)
+logging.Logger = Logger
+
+function Logger:__create(name, level)
+    oo.superclass(Logger).__create(self, name, level)
+    self.name = name
+    self.level = logging._checkLevel(level or NOTSET)
+    self.parent = nil
+    self.propagate = true
+    self.handlers = {}
+    self.disabled = false    
+end
+
+function Logger:setLevel(level)
+    self.level = logging._checkLevel(level)
+end
+
+-- info, debug, error, etc, functions are defined below
+-- for Logger and LoggerAdapter
+
+function Logger:exception(args)
+    args.exc_info = true
+    self:error(args)
+end
+
+function Logger:log(level, args)
+    if type(level) ~= 'number' then
+        if logging.raiseExceptions then
+            error("level must be an integer")
+        else
+            return
+        end
+    end
+    if self:isEnabledFor(level) then
+        self:_log(level, args)
+    end
+end
+
+function Logger:findCaller()
+    -- TODO: stub
+    return "(unknown file)", 0, "(unknown function)"
+end
+
+function Logger:makeRecord(name, level, fn, lno, msg, args, exc_info, func, extra)
+    local rv = LogRecord({
+        name=name, level=level, pathname=fn,
+        lineno=lno, msg=msg, args=args, exc_info=exc_info,
+        func=func
+    })
+    if extra then
+        for k, v in pairs(extra) do
+            if k == 'message' or k == 'asctime' or rv[k] then
+                error(("Attempt to overwrite '%s' in LogRecord"):format(k))
+            end
+            rv[k] = v    
+        end
+    end
+    return rv
+end
+
+function Logger:_log(level, args)
+    local fn, lno, func = nil, nil, nil
+    if logging._srcfile then
+        -- TODO: Handle exception?
+        fn, lno, func = self:findCaller()
+    else
+        fn, lno, func = "(unknown file)", 0, "(unknown function)"
+    end
+    if args.exc_info then
+        -- TODO:Get somehow exc-info?
+    end
+    local msg = args[1]
+    local actual_args = {}
+    for i, v in ipairs(args) do
+        if i ~= 1 then
+            table.insert(actual_args, v)
+        end
+    end
+    local exc_info = args.exc_info
+    local extra = args.extra
+    local record = self:makeRecord(self.name, level, fn, lno, msg, actual_args, exc_info, func, extra)
+    self:handle(record)
+end
+
+function Logger:handle(record)
+    if not self.disabled and self:filter(record) then
+        self:callHandlers(record)
+    end
+end
+
+function Logger:addHandler(hdlr)
+    if not common.table.index(self.handlers, hdlr) then
+        table.insert(self.handlers, hdlr)
+    end
+end
+
+function Logger:removeHandler(hdlr)
+    local i = common.table.index(self.handlers, hdlr)
+    if i then
+        table.remove(self.handlers, i)
+    end
+end
+
+function Logger:callHandlers(record)
+    local c = self
+    local found_handler = false
+    while c do
+        for i, hdlr in ipairs(c.handlers) do
+            found_handler = true
+            if record.levelno >= hdlr.level then
+                hdlr:handle(record)
+            end
+        end
+        if not c.propagate then
+            c = nil
+        else
+            c = c.parent
+        end
+    end
+    if (not found_handler and logging.raiseExceptions
+        and not self.manager.emittedNoHandlerWarning) then
+        io.stderr.write(("No handlers could be found for logger '%s'"):format(self.name))
+        self.manager.emittedNoHandlerWarning = true
+    end
+end
+
+function Logger:getEffectiveLevel()
+    local logger = self
+    while logger do
+        if logger.level ~= NOTSET then
+            return logger.level
+        end
+        logger = logger.parent
+    end
+    return NOTSET
+end
+
+function Logger:isEnabledFor(level)
+    if self.manager.disable >= level then
+        return false
+    end
+    return level >= self:getEffectiveLevel()
+end
+
+function Logger:getChild(suffix)
+    if self.root ~= self then
+        suffix = self.name .. '.' .. suffix
+    end
+    return self.manager:getLogger(suffix)
+end
+
+local RootLogger = common.baseclass.class({}, Logger)
+logging.RootLogger = RootLogger
+
+function RootLogger:__create(level)
+    oo.superclass(RootLogger).__create(self, 'root', level)
+end
+
+logging._loggerClass = Logger
+
+local LoggerAdapter = common.baseclass.class()
+logging.LoggerAdapter = LoggerAdapter
+
+function LoggerAdapter:__create(logger, extra)
+    self.logger = logger
+    self.extra = extra
+end
+
+function LoggerAdapter:process(args)
+    args.extra = self.extra
+end
+
+function LoggerAdapter:log(level, args)
+    self:process(args)
+    self.logger:log(level, args)
+end
+
+function LoggerAdapter:exception(args)
+    self:process(args)
+    args.exc_info = true
+    self.logger.error(args)
+end
+
+function LoggerAdapter:isEnabledFor(level)
+    return self.logger:isEnabledFor(level)
+end
+
+-- Logging function for each level
+
+for k, v in pairs(logging.levels) do
+    if type(k) == 'string' then
+        local level, levelname = v, k
+        levelname = levelname:lower()
+        Logger[levelname] = function (self, args)
+            if self:isEnabledFor(level) then
+                self:_log(level, args)
+            end
+        end
+        LoggerAdapter[levelname] = function (self, args)
+            self:process(args)
+            self.logger[levelname](self.logger, args)
+        end
+    end 
+end
+
+logging.root = RootLogger(WARNING)
+Logger.root = root
+Logger.manager = Manager(Logger.root)
 
 return common.package(logging, ...)

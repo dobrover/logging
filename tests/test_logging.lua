@@ -41,14 +41,14 @@ end
 
 module( "test_LogRecord", package.seeall, lunit.testcase )
 
-local creation_args = {name='root', level=30, pathname='me.lua', lineno=42, msg='Hello! %(world)s', args=nil, exc_info=nil}
+local creation_args = {name='root', level=30, pathname='me.lua', lineno=42, msg='Hello! %s', args=nil, exc_info=nil}
 
 function test_creation()
     local lr = logging.LogRecord
     local args = copy(creation_args)
-    args.args = {world='Earth'}
+    args.args = {'Earth'}
     local r = lr(args)
-    assert_equal('Earth', r.args.world)
+    assert_equal('Earth', r.args[1])
 
     args = copy(creation_args)
     args.args = 'test'
@@ -63,7 +63,7 @@ end
 
 function test_getMessage()
     local args = copy(creation_args)
-    args.args = {world='Earth'}
+    args.args = {'Earth'}
     r = logging.LogRecord(args)
     assert_equal('Hello! Earth', r:getMessage())
 
@@ -82,8 +82,8 @@ module( "test_Formatter", package.seeall, lunit.testcase )
 
 function test_format()
     local args = copy(creation_args)
-    args.msg = 'major %(name)s'
-    args.args = {name='Tom'}
+    args.msg = 'major %s'
+    args.args = {'Tom'}
     r = logging.LogRecord(args)
     fmt = logging.Formatter()
     assert_equal('major Tom', fmt:format(r))
@@ -108,14 +108,14 @@ module( "test_BufferingFormatter", package.seeall, lunit.testcase )
 local function get_recs()
     local args = copy(creation_args)
     r1 = logging.LogRecord(args)
-    r1.msg = 'Hello, %(world)s'
-    r1.args = {world='earth'}
+    r1.msg = 'Hello, %s'
+    r1.args = {'earth'}
     r2 = logging.LogRecord(args)
-    r2.msg = 'How are you, %(major)s'
-    r2.args = {major='tom'}
+    r2.msg = 'How are you, %s'
+    r2.args = {'tom'}
     r3 = logging.LogRecord(args)
-    r3.msg = 'Bye, %(major)s, bye %(world)s'
-    r3.args = {major='tom', world='earth'}
+    r3.msg = 'Bye, %s, bye %s'
+    r3.args = {'tom', 'earth'}
     return {r1, r2, r3}
 end
 
@@ -276,11 +276,11 @@ function test_streamhandler_simple()
     f = stringio.create()
     h = logging.StreamHandler(f)
     r = logging.LogRecord(creation_args)
-    r.msg = 'hello %(world)s'
-    r.args = {world='earth'}
+    r.msg = 'hello %s'
+    r.args = {'earth'}
     h:handle(r)
-    r.msg = 'bye %(major)s'
-    r.args = {major='tom'}
+    r.msg = 'bye %s'
+    r.args = {'tom'}
     h:handle(r)
     assert_equal('hello earth\nbye tom\n', f:value())
 
@@ -316,11 +316,11 @@ end
 function test_filehandler_simple()
     h = logging.FileHandler(fname)
     r = logging.LogRecord(creation_args)
-    r.msg = 'hello %(world)s'
-    r.args = {world='earth'}
+    r.msg = 'hello %s'
+    r.args = {'earth'}
     h:handle(r)
-    r.msg = 'bye %(major)s'
-    r.args = {major='tom'}
+    r.msg = 'bye %s'
+    r.args = {'tom'}
     h:handle(r)
     h:flush()
     resf = io.open(fname, 'rb'):read('*all')
@@ -330,11 +330,11 @@ function test_filehandler_simple()
 
     h = logging.FileHandler(fname, 'wb', true)
     r = logging.LogRecord(creation_args)
-    r.msg = 'hello! %(world)s'
-    r.args = {world='earth'}
+    r.msg = 'hello! %s'
+    r.args = {'earth'}
     h:handle(r)
-    r.msg = 'bye! %(major)s'
-    r.args = {major='tom'}
+    r.msg = 'bye! %s'
+    r.args = {'tom'}
     h:handle(r)
     h:close()
     resf = io.open(fname, 'rb'):read('*all')
