@@ -487,7 +487,7 @@ end
 function logging._checkLoggerClass(klass)
     if klass ~= logging.Logger then
         if not oo.subclassof(klass, logging.Logger) then
-            error("Logger not derived from logging.Logger: " .. klass)
+            error("Logger not derived from logging.Logger: " .. tostring(klass))
         end
     end
     return klass
