@@ -142,12 +142,12 @@ function LogRecord:__create(args)
     self.levelname = logging.getLevelName(self.levelno)
     self.pathname = args.pathname
     self.lineno = args.lineno
-    self.msg = args.msg
-    self.args = args.args
-    -- args are either nil or a single element, or a table.
-    if self.args ~= nil and type(self.args) ~= 'table' then
-        self.args = {self.args}
+    if type(args.msg) ~= 'string' then
+        error("LogRecord message should be a string!")
     end
+    self.msg = args.msg
+    -- args is always a sequence with size denoted by n key.
+    self.args = args.args
     self.exc_info = args.exc_info
     self.created = ct
     self.msecs = (ct - math.floor(ct)) * 1000
@@ -162,8 +162,8 @@ function LogRecord:__tostring()
 end
 
 function LogRecord:getMessage()
-    if self.args then
-        return self.msg:format(unpack(self.args))
+    if self.args.n > 0 then
+        return self.msg:format(unpack(self.args, 1, self.args.n))
     else
         return self.msg
     end
@@ -606,12 +606,13 @@ end
 
 -- info, debug, error, etc, functions are defined below
 -- in a loop
-function Logger:exception(args)
-    args.exc_msg = logging.NO_EXC_MESSAGE
+function Logger:exception(...)
+    local args = common.table.vararg_to_table(...)
+    args.kw.exc_msg = logging.NO_EXC_MESSAGE
     self:error(args)
 end
 
-function Logger:log(level, args)
+function Logger:log(level, ...)
     if type(level) ~= 'number' then
         if logging.raiseExceptions then
             error("level must be an integer")
@@ -620,7 +621,7 @@ function Logger:log(level, args)
         end
     end
     if self:isEnabledFor(level) then
-        self:_log(level, args)
+        self:_log(level, ...)
     end
 end
 
@@ -662,7 +663,9 @@ function Logger:makeRecord(name, level, fn, lno, msg, args, exc_info, func, extr
     return rv
 end
 
-function Logger:_log(level, args)
+function Logger:_log(level, ...)
+    local args = common.table.vararg_to_table(...)
+    local kwargs = args.kw
     local fn, lno, func = nil, nil, nil
     if logging._srcfile then
         -- TODO: Handle exception?
@@ -670,12 +673,13 @@ function Logger:_log(level, args)
     else
         fn, lno, func = "(unknown file)", 0, "(unknown function)"
     end
-    exc_info = {}
-    if args.exc_msg then
-        exc_info.exc_msg = args.exc_msg
+    -- Extract exc_info from kwargs
+    local exc_info = {}
+    if kwargs.exc_msg then
+        exc_info.exc_msg = kwargs.exc_msg
     end
-    if args.exc_tb then
-        exc_info.exc_tb = args.exc_tb
+    if kwargs.exc_tb then
+        exc_info.exc_tb = kwargs.exc_tb
     end
     -- Automatically add traceback
     if exc_info.exc_msg and not exc_info.exc_tb then
@@ -689,18 +693,16 @@ function Logger:_log(level, args)
         end
         exc_info.exc_tb = debug.traceback(nil, i)
     end
-
-    args.exc_info = exc_info
+    local extra = kwargs.extra
+    -- Separate message from args
     local msg = args[1]
-    local actual_args = {}
-    for i, v in ipairs(args) do
-        if i ~= 1 then
-            table.insert(actual_args, v)
-        end
+    args.n = args.n - 1
+    for i = 1, args.n do
+        args[i] = args[i + 1]
     end
-    local exc_info = args.exc_info
-    local extra = args.extra
-    local record = self:makeRecord(self.name, level, fn, lno, msg, actual_args, exc_info, func, extra)
+    -- After this line args is a pure sequence
+    args.kw = nil
+    local record = self:makeRecord(self.name, level, fn, lno, msg, args, exc_info, func, extra)
     self:handle(record)
 end
 
@@ -798,17 +800,19 @@ function LoggerAdapter:__create(logger, extra)
 end
 
 function LoggerAdapter:process(args)
-    args.extra = self.extra
+    args.kw.extra = self.extra
 end
 
-function LoggerAdapter:log(level, args)
+function LoggerAdapter:log(level, ...)
+    local args = common.table.vararg_to_table(...)
     self:process(args)
     self.logger:log(level, args)
 end
 
-function LoggerAdapter:exception(args)
+function LoggerAdapter:exception(...)
+    local args = common.table.vararg_to_table(...)
     self:process(args)
-    args.exc_msg = logging.NO_EXC_MESSAGE
+    args.kw.exc_msg = logging.NO_EXC_MESSAGE
     self.logger:error(args)
 end
 
@@ -866,34 +870,36 @@ for k, v in pairs(logging.levels) do
     if type(k) == 'string' then
         local level, levelname = v, k
         levelname = levelname:lower()
-        Logger[levelname] = function (self, args)
+        Logger[levelname] = function (self, ...)
             if self:isEnabledFor(level) then
-                self:_log(level, args)
+                self:_log(level, ...)
             end
         end
-        LoggerAdapter[levelname] = function (self, args)
+        LoggerAdapter[levelname] = function (self, ...)
+            local args = common.table.vararg_to_table(...)
             self:process(args)
             self.logger[levelname](self.logger, args)
         end
-        logging[levelname] = function (args)
+        logging[levelname] = function (...)
             if #logging.root.handlers == 0 then
                 logging.basicConfig()
             end
-            logging.root[levelname](logging.root, args)
+            logging.root[levelname](logging.root, ...)
         end
     end 
 end
 
-function logging.exception(args)
-    args.exc_msg = logging.NO_EXC_MESSAGE
+function logging.exception(...)
+    local args = common.table.vararg_to_table(...)
+    args.kw.exc_msg = logging.NO_EXC_MESSAGE
     logging.error(args)
 end
 
-function logging.log(level, args)
+function logging.log(level, ...)
     if #logging.root.handlers == 0 then
         logging.basicConfig()
     end
-    logging.root:log(level, args)
+    logging.root:log(level, ...)
 end
 
 function logging.disable(level)

@@ -14,7 +14,7 @@ local logging = require 'logging'
 local common = require 'common'
 local stringio = require 'pl.stringio'
 local oo = require 'loop.simple'
-
+local kw = common.table.kw
 module( "test_logging_general", package.seeall, lunit.testcase )
 
 local saved_levels = nil
@@ -42,39 +42,37 @@ end
 
 module( "test_LogRecord", package.seeall, lunit.testcase )
 
-local creation_args = {name='root', level=30, pathname='me.lua', lineno=42, msg='Hello! %s', args=nil, exc_info=nil}
+local creation_args = {name='root', level=30, pathname='me.lua', lineno=42, msg='Hello! %s', args={n=0}, exc_info=nil}
 
 function test_creation()
     local lr = logging.LogRecord
     local args = copy(creation_args)
-    args.args = {'Earth'}
+    args.args = {'Earth', n=1}
     local r = lr(args)
     assert_equal('Earth', r.args[1])
 
-    args = copy(creation_args)
-    args.args = 'test'
-    r = lr(args)
-    assert_equal('test', r.args[1])
-
     local obj = copy(r)
     r = lr({obj=obj})
-    assert_equal('test', r.args[1])
+    assert_equal('Earth', r.args[1])
     assert_equal('me.lua', r.pathname)
+
+    args.msg = nil
+    assert_error(function () lr(args) end)
 end
 
 function test_getMessage()
     local args = copy(creation_args)
-    args.args = {'Earth'}
+    args.args = {'Earth', n=1}
     r = logging.LogRecord(args)
     assert_equal('Hello! Earth', r:getMessage())
 
-    args.msg = 'test'
-    args.args = nil
+    args.msg = 'test %s %s %s'
+    args.args = {[1]='a', [2]=nil, [3]='b', n=3}
     r = logging.LogRecord(args)
-    assert_equal('test', r:getMessage())
+    assert_equal('test a nil b', r:getMessage())
 
     args.msg = 'test %d'
-    args.args = 42
+    args.args = {42, n=1}
     r = logging.LogRecord(args)
     assert_equal('test 42', r:getMessage())
 end
@@ -84,7 +82,7 @@ module( "test_Formatter", package.seeall, lunit.testcase )
 function test_format()
     local args = copy(creation_args)
     args.msg = 'major %s'
-    args.args = {'Tom'}
+    args.args = {'Tom', n=1}
     r = logging.LogRecord(args)
     fmt = logging.Formatter()
     assert_equal('major Tom', fmt:format(r))
@@ -110,13 +108,13 @@ local function get_recs()
     local args = copy(creation_args)
     r1 = logging.LogRecord(args)
     r1.msg = 'Hello, %s'
-    r1.args = {'earth'}
+    r1.args = {'earth', n=1}
     r2 = logging.LogRecord(args)
     r2.msg = 'How are you, %s'
-    r2.args = {'tom'}
+    r2.args = {'tom', n=1}
     r3 = logging.LogRecord(args)
     r3.msg = 'Bye, %s, bye %s'
-    r3.args = {'tom', 'earth'}
+    r3.args = {'tom', 'earth', n=2}
     return {r1, r2, r3}
 end
 
@@ -230,7 +228,7 @@ function test_handler_functions()
 
     r = logging.LogRecord(copy(creation_args))
     r.msg = 'test %s'
-    r.args = {1}
+    r.args = {1, n=1}
     assert_equal('test 1', h:format(r))
 
     h:setFormatter(logging.Formatter('%(levelname)s %(message)s'))
@@ -285,10 +283,10 @@ function test_streamhandler_simple()
     h = logging.StreamHandler(f)
     r = logging.LogRecord(creation_args)
     r.msg = 'hello %s'
-    r.args = {'earth'}
+    r.args = {'earth', n=1}
     h:handle(r)
     r.msg = 'bye %s'
-    r.args = {'tom'}
+    r.args = {'tom', n=1}
     h:handle(r)
     assert_equal('hello earth\nbye tom\n', f:value())
 
@@ -325,10 +323,10 @@ function test_filehandler_simple()
     h = logging.FileHandler(fname)
     r = logging.LogRecord(creation_args)
     r.msg = 'hello %s'
-    r.args = {'earth'}
+    r.args = {'earth', n=1}
     h:handle(r)
     r.msg = 'bye %s'
-    r.args = {'tom'}
+    r.args = {'tom', n=1}
     h:handle(r)
     h:flush()
     resf = io.open(fname, 'rb'):read('*all')
@@ -339,10 +337,10 @@ function test_filehandler_simple()
     h = logging.FileHandler(fname, 'wb', true)
     r = logging.LogRecord(creation_args)
     r.msg = 'hello! %s'
-    r.args = {'earth'}
+    r.args = {'earth', n=1}
     h:handle(r)
     r.msg = 'bye! %s'
-    r.args = {'tom'}
+    r.args = {'tom', n=1}
     h:handle(r)
     h:close()
     resf = io.open(fname, 'rb'):read('*all')
@@ -528,29 +526,31 @@ function test_logger_log()
     end
     manager:setLoggerClass(mylogcls)
     l = manager:getLogger('logger')
-    l:log(20, {"hello %s", "world"})
+    l:log(20, "hello %s %s %s", "world", nil, "dear!")
     r = l.handled[1]
-    assert_equal('hello %s', r.msg)
+    assert_equal('hello %s %s %s', r.msg)
     assert_equal('world', r.args[1])
-    assert_equal(1, #r.args)
+    assert_equal(nil, r.args[2])
+    assert_equal('dear!', r.args[3])
+    assert_equal(3, r.args.n)
     assert_equal(20, r.levelno)
-    assert_error(function () l:log('s', {"msg"}) end)
+    assert_error(function () l:log('s', "msg") end)
 
     l:setLevel(30)
-    l:log(20, {"msg"})
+    l:log(20, "msg")
     assert_nil(l.handled[2])
 
-    l:log(30, {"msg %s", "world"; exc_msg="Error!", exc_tb='tb', extra={x='y'}})
+    l:log(30, "msg %s", "world", kw{exc_msg="Error!", exc_tb='tb', extra={x='y'}})
     r = l.handled[2]
     assert_equal("Error!", r.exc_info.exc_msg)
     assert_equal("tb", r.exc_info.exc_tb)
     assert_equal('y', r.x)
 
-    assert_error(function () l:log(30, {"msg"; extra={asctime=1}}) end)
-    assert_error(function () l:log(30, {"msg"; extra={levelname=1}}) end)
+    assert_error(function () l:log(30, "msg", kw{extra={asctime=1}}) end)
+    assert_error(function () l:log(30, "msg", kw{extra={levelname=1}}) end)
     curline = debug.getinfo(1, "l").currentline
     function testme()
-        l:log(30, {"msg"})
+        l:log(30, "msg")
     end
     curline_end = debug.getinfo(1, "l").currentline
     testme()
@@ -571,7 +571,7 @@ function test_logger_nohandlers()
     l = manager:getLogger('newname')
     old_stderr = io.stderr
     io.stderr = stringio.create()
-    l:info{"hello!"}
+    l:info("hello!")
     assert_equal("No handlers could be found for logger 'newname'\n" ,io.stderr:value())
     io.stderr = old_stderr
 end
@@ -586,7 +586,7 @@ function test_logger_exception()
     sio = stringio.create()
     h = logging.StreamHandler(sio)
     l:addHandler(h)
-    l:info{"test"; exc_msg="error", exc_tb="traceback"}
+    l:info("test", kw{exc_msg="error", exc_tb="traceback"})
     assert_equal("test\ntraceback\nerror\n",sio:value())
 end
 
@@ -603,7 +603,7 @@ function test_logger_adapter_simple()
     l:addHandler(h)
     fmt = logging.Formatter("%(hello)s %(message)s")
     h:setFormatter(fmt)
-    la:info{"Hello!"}
+    la:info("Hello!")
     assert_equal('world Hello!\n', sio:value())
 
     assert_false(la:isEnabledFor(10))
@@ -613,7 +613,7 @@ function test_logger_adapter_simple()
     l:removeHandler(h)
     h = logging.StreamHandler(sio)
     l:addHandler(h)
-    la:exception{"Yup"}
+    la:exception("Yup")
     assert_not_nil(sio:value():find('Yup\n'))
     assert_not_nil(sio:value():find('test_logging.lua'))
     assert_not_nil(sio:value():find(logging.NO_EXC_MESSAGE))
@@ -622,7 +622,7 @@ function test_logger_adapter_simple()
     l:removeHandler(h)
     h = logging.StreamHandler(sio)
     l:addHandler(h)
-    la:log(20, {"Yuppy"})
+    la:log(20, "Yuppy")
     assert_equal('Yuppy\n', sio:value())
 end
 
@@ -633,13 +633,13 @@ function test_logging_misc_simple()
     local logging = require 'logging'
     local sio = stringio.create()
     logging.basicConfig{stream=sio, format="%(levelname)s %(message)s", level=30}
-    logging.info{"Test1"}
-    logging.error{"Test2"}
+    logging.info("Test1")
+    logging.error("Test2")
 
    logging.disable(30)
    
-   logging.warn{"No!"}
-   logging.error{"Yes!"}
+   logging.warn("No!")
+   logging.error("Yes!")
 
     assert_equal('ERROR Test2\nERROR Yes!\n', sio:value())
 
@@ -648,7 +648,7 @@ function test_logging_misc_simple()
     local sio = stringio.create()
     logging.basicConfig{stream=sio, format="%(levelname)s %(message)s", level=30}
 
-    logging.log(42, {"An answer"})
+    logging.log(42, "An answer")
 
     assert_equal("Level 42 An answer\n", sio:value())
 end
@@ -679,5 +679,5 @@ function test_nullhandler()
     manager = logging.Manager(root)
     l = manager:getLogger('hello')
     l:addHandler(nh)
-    l:info{"Enter the void"}
+    l:info("Enter the void")
 end

@@ -1,4 +1,5 @@
 local logging = require 'logging'
+local kw = require('common').table.kw
 
 logging.basicConfig{
     filename='root.log',
@@ -16,6 +17,7 @@ local httphdlr = logging.FileHandler('http.log')
 httphdlr:setFormatter(logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s"))
 
 local parsehdlr = logging.FileHandler('parse.log')
+parsehdlr:setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
 
 logAhttp:addHandler(httphdlr)
 logAparse:addHandler(parsehdlr)
@@ -25,14 +27,14 @@ screenhdlr:setFormatter(logging.Formatter("%(asctime)s %(name)s %(levelname)s %(
 logAhttp:addHandler(screenhdlr)
 
 screenhdlr:setLevel(logging.ERROR)
-logging:info{"Started!"}
-logAhttp:info{"Downloading web page!"}
-logAhttp:info{"Downloaded!"}
-logAparse:info{"Parsing web page!"}
-logAparse:debug{"Met %s tag, don't worry", "<a>"}
-logAparse:warn{"Oops, a minor exception while parsing", exc_msg="Unclosed HTML tag!"}
-logAparse:info{"Parsed!"}
+logging:info("Started!")
+logAhttp:info("Downloading web page!")
+logAhttp:info("Downloaded!")
+logAparse:info("Parsing web page!")
+logAparse:debug("Met %s tag, don't worry", "<a>")
+logAparse:warn("Oops, a minor exception while parsing", kw{exc_msg="Unclosed HTML tag!"})
+logAparse:info("Parsed!")
 
-logAhttp:info{"Getting another page"}
-logAhttp:error{"Could not download page %s", "http://google.com/"}
-logging:info{"Finished!"}
+logAhttp:info("Getting another page")
+logAhttp:error("Could not download page %s", "http://google.com/")
+logging:info("Finished!")
