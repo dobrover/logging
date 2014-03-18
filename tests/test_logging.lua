@@ -290,7 +290,6 @@ function test_streamhandler_simple()
     h:handle(r)
     assert_equal('hello earth\nbye tom\n', f:value())
 
-
     h:flush()
     called = false
     f.flush = function(self)
@@ -302,6 +301,24 @@ function test_streamhandler_simple()
     -- Check that parent constructor is called
     assert_equal(0, h.level)
 end
+
+-- Tests issue #1
+-- https://github.com/dobrover/logging/issues/1
+function test_streamhandler_flush_after_emit()
+    local stream = stringio.create()
+    local handler = logging.StreamHandler(stream)
+    local r = logging.LogRecord(creation_args)
+    local flush_called = 0
+    stream.flush = function(self)
+        flush_called = flush_called + 1
+    end
+    for i = 1,3 do
+        handler:handle(r)
+        -- Flush should be called after each handle.
+        assert_equal(i, flush_called)
+    end
+end
+
 
 module( "test_filehandler", package.seeall, lunit.testcase)
 

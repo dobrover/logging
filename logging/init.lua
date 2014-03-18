@@ -430,7 +430,7 @@ function StreamHandler:emit(record)
     -- TODO: Try-finally?  Handlerror?
     local msg = self:format(record)
     self.stream:write(msg .. '\n')
-
+    self:flush()
 end
 
 function FileHandler:__create(filename, mode, delay)
